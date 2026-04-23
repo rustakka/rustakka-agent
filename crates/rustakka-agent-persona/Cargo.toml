@@ -1,0 +1,15 @@
+[package]
+name         = "rustakka-agent-persona"
+version      = { workspace = true }
+edition      = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+rust-version = { workspace = true }
+description  = "Persona aggregate (IQ + EQ + non-physical identity) for rustakka-agent. STUB."
+
+[dependencies]
+serde      = { workspace = true }
+serde_json = { workspace = true }
+rustakka-agent-traits = { path = "../rustakka-agent-traits" }
+rustakka-agent-iq     = { path = "../rustakka-agent-iq" }
+rustakka-agent-eq     = { path = "../rustakka-agent-eq" }
