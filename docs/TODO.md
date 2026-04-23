@@ -44,15 +44,30 @@ checkboxes as PRs land.
       - [ ] Per-subagent default IQ-tier mapping
       - [ ] Integration tests (mock provider, shallow + deep paths)
       - [ ] `examples/rust_aiq_research` + `docs/aiq-research.md`
+- [ ] **Phase 5b** — Oh-My-OpenAgent-style harness graph
+      (`rustakka-agent-prebuilt::omo_harness`, feature
+      `omo-harness`):
+      - [ ] Canonical discipline personas (sisyphus, prometheus,
+            hephaestus, oracle, librarian, explore, visio, quick)
+      - [ ] Persona-aware category router consulting orchestrator
+            intent + discipline categories
+      - [ ] `BoulderStore` session-continuity channel on top of
+            `rustakka-langgraph-store`
+      - [ ] `HashlineGate` (Off | Warn | Enforce) wired in for
+            tools tagged `category=edit`
+      - [ ] Integration tests: routing by category, boulder resume,
+            stale-edit rejection
+      - [ ] `examples/rust_omo_harness` + `docs/omo-harness.md`
 - [ ] **Phase 6** — Umbrella `rustakka-agent` crate (feature gates
-      including `aiq-research`) and `rustakka-agent-profiler`
-      scenarios
+      including `aiq-research` and `omo-harness`) and
+      `rustakka-agent-profiler` scenarios
 - [ ] **Phase 7** — `pyagent` cdylib + `python/rustakka_agent`
       package + pytest parity suite
 - [ ] **Phase 8** — Examples (`rust_persona_react`,
-      `rust_supervisor_team`, `rust_aiq_research`) +
-      `docs/persona-schema.md` + `docs/iq-ladders.md` +
-      `docs/aiq-research.md` + `docs/integration.md`
+      `rust_supervisor_team`, `rust_aiq_research`,
+      `rust_omo_harness`) + `docs/persona-schema.md` +
+      `docs/iq-ladders.md` + `docs/aiq-research.md` +
+      `docs/omo-harness.md` + `docs/integration.md`
 - [ ] **Phase 9** — Hardening: fuzzing loaders (persona + ladder),
       golden-file prompt tests, committed benchmarks, safety
       red-team suite

@@ -89,7 +89,7 @@ crates/
   rustakka-agent-eq/           # EQ profile: empathy, tone, mood, reflection
   rustakka-agent-persona/      # Persona struct + builder + (de)serialization
   rustakka-agent-prebuilt/     # Bridge into rustakka-langgraph prebuilts
-                               # + aiq_research graph
+                               # + aiq_research + omo_harness graphs
   rustakka-agent/              # Umbrella façade (feature-gated re-exports)
   rustakka-agent-profiler/     # Micro-bench: persona-compile / prompt-assembly
   py-bindings/pyagent/         # Optional PyO3 cdylib -> rustakka_agent._native
@@ -100,12 +100,14 @@ examples/
   rust_persona_react/          # ReAct agent with a persona
   rust_supervisor_team/        # Multi-persona supervisor team
   rust_aiq_research/           # AI-Q-style deep-research graph
+  rust_omo_harness/            # Oh-My-OpenAgent-style harness graph
 docs/
   plan.md                      # (this file)
   TODO.md
   persona-schema.md
   iq-ladders.md                # YAML/TOML schema for IqLadder / carryings
   aiq-research.md              # AI-Q graph topology, state, middleware
+  omo-harness.md               # OMO harness topology, boulder, hashline
   integration.md
 ```
 
@@ -405,7 +407,7 @@ existing public APIs already exercised by upstream tests.
 
 ---
 
-## 5a. Prebuilt research graphs
+## 5a. Prebuilt research & harness graphs
 
 Beyond the minimal persona wrappers of § 5, `rustakka-agent-prebuilt`
 ships opinionated, end-to-end agent graphs that are ready to compile.
@@ -541,6 +543,123 @@ requests (or, in `AgentEnv::Test`, uses a deterministic fixture).
   plug in via `rustakka-langgraph-providers` and the standard
   `Tool` registration path.
 
+### 5a.2 Harness graph — Oh-My-OpenAgent-style (`omo_harness`)
+
+Modeled after the
+[Oh My OpenAgent](https://github.com/code-yeongyu/oh-my-openagent)
+harness: a hierarchical, category-routed multi-agent orchestrator
+(Sisyphus/Prometheus/Hephaestus/… are the canonical names in the
+original). We re-express the *pattern* in rustakka-agent terms:
+
+- One **orchestrator** persona that parses intent and delegates.
+- A set of **discipline** personas routed by **category**, not by
+  model name — the IQ ladder picks the actual model per tier.
+- A **session-continuity** channel (`omo.boulder`) mirroring the
+  original `boulder.json` so a graph resumed from a checkpoint
+  continues the same boulder.
+- Optional **hash-anchored edit** middleware for code-editing
+  subagents (`omo.hashline`) that refuses edits whose anchor hash
+  has drifted.
+
+#### Canonical disciplines
+
+Shipped as a default set; every discipline is a `PersonaAgent`
+assignable to any `ChatModel` ladder rung.
+
+| Discipline     | Default persona role      | Default category      | Default IQ tier |
+|----------------|---------------------------|-----------------------|-----------------|
+| `sisyphus`     | primary orchestrator       | `orchestration`       | `Strategist`    |
+| `prometheus`   | strategic planner          | `planning`            | `Strategist`    |
+| `hephaestus`   | autonomous deep worker     | `deep`                | `Scholar`       |
+| `oracle`       | architecture reviewer      | `ultrabrain`          | `Strategist`    |
+| `librarian`    | docs / context curator     | `documentation`       | `Analyst`       |
+| `explore`      | codebase / corpus search   | `search`              | `Operator`      |
+| `visio`        | UI / visual work           | `visual-engineering`  | `Analyst`       |
+| `quick`        | single-file touch-ups      | `quick`               | `Reflex`        |
+
+#### Topology
+
+```text
+                          ┌────────────┐
+  user ──▶ IntentGate ───▶│  sisyphus  │◀─ returns here each hop
+                          └────┬───────┘
+                               │ category routing (persona-aware)
+        ┌─────────┬─────────┬──┼──┬─────────┬─────────┐
+        ▼         ▼         ▼  ▼  ▼         ▼         ▼
+    prometheus hephaestus oracle librarian explore  visio   quick
+        │         │         │    │         │         │       │
+        └─────────┴─────────┴────┴─────────┴─────────┴───────┘
+                               ▼
+                          BoulderStore   (session continuity)
+                               ▼
+                          HashlineGate   (edit safety middleware)
+                               ▼
+                              END
+```
+
+Under the hood this is `create_persona_supervisor(...)` from § 5
+with:
+
+- a persona-aware `SupervisorRouter` that consults the
+  orchestrator's intent output **and** each discipline persona's
+  declared categories,
+- a `BoulderStore` channel built on
+  `rustakka-langgraph-store::InMemoryStore` (or `PostgresStore` in
+  prod) tagging each task with a stable ID,
+- an optional `HashlineGate` node inserted between discipline
+  agents and any tools tagged `category=edit`.
+
+#### Crate + API
+
+- Lives in `rustakka-agent-prebuilt::omo_harness`.
+- Behind a Cargo feature `omo-harness`.
+
+```rust
+pub struct OmoHarnessOptions {
+    pub ladder: IqLadder,
+    pub orchestrator: PersonaAgent,
+    pub disciplines: Vec<PersonaAgent>,          // defaults available
+    pub boulder_store: Option<Arc<dyn BaseStore>>,
+    pub hashline: HashlineMode,                  // Off | Warn | Enforce
+    pub default_set: bool,                       // install canonical defaults
+}
+
+pub async fn create_omo_harness(
+    opts: OmoHarnessOptions,
+) -> GraphResult<CompiledStateGraph>;
+
+pub fn default_disciplines(ladder: &IqLadder) -> Vec<PersonaAgent>;
+```
+
+Minimal example (Rust):
+
+```rust,ignore
+let ladder = IqLadder::builder()
+    .tier(IqTier::Scholar, openai_rung("gpt-4o"))
+    .tier(IqTier::Strategist, openai_rung("gpt-4o"))
+    .tier(IqTier::Analyst, openai_rung("gpt-4o-mini"))
+    .tier(IqTier::Operator, openai_rung("gpt-4o-mini"))
+    .tier(IqTier::Reflex, ollama_rung("llama3:8b"))
+    .build();
+
+let app = create_omo_harness(OmoHarnessOptions {
+    ladder: ladder.clone(),
+    orchestrator: PersonaAgent::sisyphus(&ladder),
+    disciplines: default_disciplines(&ladder),
+    boulder_store: Some(Arc::new(InMemoryStore::new())),
+    hashline: HashlineMode::Enforce,
+    default_set: true,
+}).await?;
+```
+
+#### Non-goals for the port
+
+- We do **not** reproduce Oh-My-OpenAgent's prompt text verbatim —
+  only the topology, state, and routing semantics. Prompt content
+  is persona-rendered.
+- We do **not** bundle vendor-specific MCP servers; MCP tools plug
+  in via `rustakka-langgraph-prebuilt::Tool`.
+
 ---
 
 ## 6. Python façade
@@ -650,6 +769,24 @@ The plan is deliberately matched to the 0–9 cadence of
   a sanitized report.
 - `examples/rust_aiq_research` + `docs/aiq-research.md`.
 
+### Phase 5b — Oh-My-OpenAgent-style harness graph
+- `rustakka-agent-prebuilt::omo_harness` module (Cargo feature
+  `omo-harness`).
+- Canonical discipline personas (sisyphus, prometheus, hephaestus,
+  oracle, librarian, explore, visio, quick) as
+  `PersonaAgent`s assembled under `create_persona_supervisor`.
+- Persona-aware category router consulting orchestrator intent
+  plus each discipline's declared categories.
+- `BoulderStore` channel (`omo.boulder`) on top of
+  `rustakka-langgraph-store` for session continuity across
+  checkpoints.
+- `HashlineGate` edit-safety middleware (`Off | Warn | Enforce`),
+  wired in automatically for any tool tagged `category=edit`.
+- Integration tests: task routes to the right discipline based on
+  category; resumed run picks up the same boulder; enforced
+  hashline rejects stale edits.
+- `examples/rust_omo_harness` + `docs/omo-harness.md`.
+
 ### Phase 6 — Umbrella crate + profiler
 - `rustakka-agent` facade re-exports with `persona`, `prebuilt`,
   `providers` feature flags.
@@ -663,10 +800,11 @@ The plan is deliberately matched to the 0–9 cadence of
 
 ### Phase 8 — Docs & examples
 - `examples/rust_persona_react`, `examples/rust_supervisor_team`,
-  `examples/rust_aiq_research`.
+  `examples/rust_aiq_research`, `examples/rust_omo_harness`.
 - `docs/persona-schema.md` (authoritative JSON schema for personas).
 - `docs/iq-ladders.md` (authoritative schema for ladders + carryings).
-- `docs/aiq-research.md` — topology, routing, middleware reference.
+- `docs/aiq-research.md` / `docs/omo-harness.md` — topology,
+  routing, middleware references.
 - `docs/integration.md` (how to migrate existing
   `create_react_agent` callers).
 
