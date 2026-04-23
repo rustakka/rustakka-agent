@@ -85,7 +85,7 @@ iq / eq / persona crates are pure data + logic and stay decoupled.
 ```text
 crates/
   rustakka-agent-traits/       # Trait + Score + Dimension primitives
-  rustakka-agent-iq/           # IQ profile: reasoning, planning, verbosity
+  rustakka-agent-iq/           # IQ profile + IqTier + IqLadder / carryings
   rustakka-agent-eq/           # EQ profile: empathy, tone, mood, reflection
   rustakka-agent-persona/      # Persona struct + builder + (de)serialization
   rustakka-agent-prebuilt/     # Bridge into rustakka-langgraph prebuilts
@@ -102,6 +102,7 @@ docs/
   plan.md                      # (this file)
   TODO.md
   persona-schema.md
+  iq-ladders.md                # YAML/TOML schema for IqLadder / carryings
   integration.md
 ```
 
@@ -162,6 +163,113 @@ Effects at compile time:
   when a `ChatModel` is bound.
 - `verbosity` adds a prompt fragment like
   `"Be concise: target {n} sentences per reply."`.
+
+#### 4.2.1 IQ tiers & per-tier model ladders
+
+An `IqProfile` alone does not pin a specific LLM; instead we bucket
+profiles into **IQ tiers** and let each tier carry its own *ladder* of
+models and call-time carryings (temperature, top-p, max-tokens,
+context window, tool allow-list, cache policy, …). Callers can then
+bind a single `ChatModel` *ladder* to a persona and let the profile
+choose which rung to use at runtime.
+
+```rust
+/// Coarse IQ bucket. Ranges are expressed in terms of a composite
+/// score `w_depth * reasoning_depth + w_plan * normalize(planning_hops)
+/// + w_tool * tool_eagerness`, clamped to [0, 1].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum IqTier {
+    /// 0.00..0.20 — tiny, reactive agents (FAQ, classifier-style).
+    Reflex,
+    /// 0.20..0.40 — bounded tool loops, single-hop research.
+    Operator,
+    /// 0.40..0.60 — general assistant, 2–3 hop planning.
+    Analyst,
+    /// 0.60..0.80 — multi-step planning, self-critique, tool teams.
+    Strategist,
+    /// 0.80..1.00 — deep research, long-horizon, ensemble reasoning.
+    Scholar,
+}
+
+/// Call-time "carryings" — runtime knobs applied to every LLM call
+/// made by a node running under this tier.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct IqCarryings {
+    pub temperature: Option<f32>,
+    pub top_p: Option<f32>,
+    pub max_output_tokens: Option<u32>,
+    pub context_window_hint: Option<u32>,
+    pub recursion_limit: Option<u32>,
+    pub cache_policy: Option<CachePolicy>,       // re-exported upstream
+    pub tool_allow_list: Option<Vec<String>>,
+    pub system_prompt_addendum: Option<String>,
+}
+
+/// A single rung on a tier's model ladder. Rungs are tried top-to-
+/// bottom; the first one whose `predicate` (if any) accepts the
+/// bound `ChatModel` + `CallOptions` is used.
+#[derive(Clone)]
+pub struct ModelRung {
+    pub name: String,                             // e.g. "gpt-4o"
+    pub model: Arc<dyn ChatModel>,                // from providers crate
+    pub carryings: IqCarryings,
+    pub predicate: Option<Arc<dyn Fn(&IqProfile) -> bool + Send + Sync>>,
+}
+
+/// Ordered ladder of model rungs for a single tier.
+#[derive(Clone)]
+pub struct TierLadder {
+    pub tier: IqTier,
+    pub rungs: Vec<ModelRung>,
+}
+
+/// Full ladder across every tier. Missing tiers fall back to the
+/// next-higher defined tier, then to `default` (if set).
+#[derive(Clone, Default)]
+pub struct IqLadder {
+    pub tiers: BTreeMap<IqTier, TierLadder>,
+    pub default: Option<ModelRung>,
+}
+
+impl IqLadder {
+    pub fn builder() -> IqLadderBuilder { /* … */ }
+
+    /// Select a rung for the given profile.
+    pub fn select(&self, iq: &IqProfile) -> Option<&ModelRung> { /* … */ }
+
+    /// Fold the selected rung's `IqCarryings` into `CallOptions`.
+    pub fn apply(&self, iq: &IqProfile, opts: &mut CallOptions) { /* … */ }
+}
+```
+
+Recommended **default ladder** (users override freely; choices are
+examples, not a hard dependency):
+
+| Tier         | Score    | Typical carryings                                    | Example model rungs (top→bottom fallback)                     |
+|--------------|----------|------------------------------------------------------|---------------------------------------------------------------|
+| `Reflex`     | 0.00–0.20 | `temperature=0.0`, `max_output_tokens≈256`, no tools | `gpt-4o-mini` → `llama3:8b` → `mock`                           |
+| `Operator`   | 0.20–0.40 | `temperature=0.2`, `max_output_tokens≈768`, curated tools | `gpt-4o-mini` → `claude-haiku` → `llama3:8b`            |
+| `Analyst`    | 0.40–0.60 | `temperature=0.3`, `max_output_tokens≈2048`, tools on | `gpt-4o` → `claude-sonnet` → `llama3:70b`                    |
+| `Strategist` | 0.60–0.80 | `temperature=0.4`, `max_output_tokens≈4096`, reflection on | `gpt-4o` → `claude-sonnet-thinking` → `nemotron-70b`    |
+| `Scholar`    | 0.80–1.00 | `temperature=0.5`, `max_output_tokens≈8192`, ensemble + deep-research graph | `nemotron-ultra-253b` → `gpt-4o` → `claude-opus`|
+
+Additional design points:
+
+- **Ladder rungs are first-class.** `ModelRung.predicate` lets a
+  ladder react to more than just tier — e.g. "if the persona
+  pins `preferred_model="gpt-4o"`, prefer the `gpt-4o` rung".
+- **Carryings compose additively.** `IqCarryings` is folded in the
+  order: *ladder default* → *tier carryings* → *rung carryings* →
+  *persona overrides* → *caller overrides*. Later values win.
+- **Test/dev determinism.** When `AgentEnv::current() == Test`, the
+  ladder resolver forces `MockChatModel` regardless of rung, so
+  snapshot tests remain deterministic.
+- **Tier inference.** `IqProfile::tier()` returns the natural bucket
+  for the composite score; users can pin a tier explicitly via
+  `IqProfile.pinned_tier: Option<IqTier>`.
+
+See `docs/iq-ladders.md` (authored in Phase 1b) for the authoritative
+YAML/TOML schema for external ladder definitions.
 
 ### 4.3 EQ profile (crate: `rustakka-agent-eq`)
 
@@ -346,6 +454,17 @@ The plan is deliberately matched to the 0–9 cadence of
 - `rustakka-agent-iq` and `rustakka-agent-eq` crates.
 - Builder APIs, serde round-trips, `to_prompt_fragment`.
 - Unit tests for clamping, merging, prompt assembly determinism.
+
+### Phase 1b — IQ tiers & model ladder
+- `IqTier` enum + `IqProfile::tier()` composite-score inference
+  with `pinned_tier` override.
+- `IqCarryings` struct + fold order (ladder-default → tier → rung →
+  persona → caller).
+- `ModelRung`, `TierLadder`, `IqLadder`, `IqLadderBuilder`.
+- YAML/TOML loader + authoritative schema in `docs/iq-ladders.md`.
+- `AgentEnv::Test` forces `MockChatModel` regardless of rung.
+- Unit tests: tier bucketing edge cases, carryings fold order,
+  predicate-based rung selection, env-forced mock.
 
 ### Phase 2 — Persona core
 - `rustakka-agent-persona` crate with `Persona`, `Identity`,

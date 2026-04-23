@@ -7,6 +7,18 @@ checkboxes as PRs land.
       (`Trait`, `Score`, `Dimension`, `TraitSet`, `AgentEnv`) + CI
 - [ ] **Phase 1** — `rustakka-agent-iq` + `rustakka-agent-eq`
       profiles with builders, serde, and `to_prompt_fragment`
+- [ ] **Phase 1b** — IQ tiers + model ladder:
+      - [ ] `IqTier` enum + composite-score inference +
+            `pinned_tier` override
+      - [ ] `IqCarryings` struct with deterministic fold order
+            (ladder → tier → rung → persona → caller)
+      - [ ] `ModelRung` / `TierLadder` / `IqLadder` /
+            `IqLadderBuilder`
+      - [ ] YAML/TOML loader + `docs/iq-ladders.md` schema
+      - [ ] `AgentEnv::Test` forces `MockChatModel` regardless of
+            rung
+      - [ ] Unit tests: bucketing, fold order, predicate selection,
+            env-forced mock
 - [ ] **Phase 2** — `rustakka-agent-persona` core: `Persona`,
       `Identity`, `CommunicationStyle`, `MemoryPrefs`, `SafetyRails`,
       TOML/YAML/JSON loaders, snapshot-tested `to_system_prompt`
