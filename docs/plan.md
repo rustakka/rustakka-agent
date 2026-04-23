@@ -90,6 +90,12 @@ crates/
   rustakka-agent-persona/      # Persona struct + builder + (de)serialization
   rustakka-agent-prebuilt/     # Bridge into rustakka-langgraph prebuilts
                                # + aiq_research + omo_harness graphs
+                               # + patterns catalog (plan-execute,
+                               #   reflexion, evaluator-optimizer,
+                               #   self-consistency, tot/lats, debate,
+                               #   router/MoE, rag, crag, adaptive-rag,
+                               #   self-rag, hitl gate, memory agent,
+                               #   codex loop, guardrails)
   rustakka-agent/              # Umbrella façade (feature-gated re-exports)
   rustakka-agent-profiler/     # Micro-bench: persona-compile / prompt-assembly
   py-bindings/pyagent/         # Optional PyO3 cdylib -> rustakka_agent._native
@@ -101,6 +107,10 @@ examples/
   rust_supervisor_team/        # Multi-persona supervisor team
   rust_aiq_research/           # AI-Q-style deep-research graph
   rust_omo_harness/            # Oh-My-OpenAgent-style harness graph
+  rust_pattern_plan_execute/   # Plan-and-Execute pattern
+  rust_pattern_reflexion/      # Reflexion pattern
+  rust_pattern_rag_suite/      # RAG + CRAG + Adaptive-RAG + Self-RAG
+  rust_pattern_debate/         # Debate / jury pattern
 docs/
   plan.md                      # (this file)
   TODO.md
@@ -108,6 +118,7 @@ docs/
   iq-ladders.md                # YAML/TOML schema for IqLadder / carryings
   aiq-research.md              # AI-Q graph topology, state, middleware
   omo-harness.md               # OMO harness topology, boulder, hashline
+  patterns.md                  # Catalog of agentic patterns + composition
   integration.md
 ```
 
@@ -660,6 +671,144 @@ let app = create_omo_harness(OmoHarnessOptions {
 - We do **not** bundle vendor-specific MCP servers; MCP tools plug
   in via `rustakka-langgraph-prebuilt::Tool`.
 
+### 5a.3 Common agentic patterns catalog (`patterns`)
+
+On top of ReAct, Supervisor, Swarm, AI-Q, and the OMO harness,
+`rustakka-agent-prebuilt::patterns` ships a **catalog of small,
+reusable agentic patterns** that any persona can pull into its
+graph. Each pattern is:
+
+- a standalone `create_*` factory returning a `CompiledStateGraph`,
+- *and* a `Pattern` builder that can be **composed** as a subgraph
+  into a larger graph via
+  `CompiledStateGraph::as_subgraph_invoker(...)`,
+
+so a persona might use plan-execute on the outside, reflexion inside
+each execution step, and RAG inside each tool call.
+
+Every pattern honors the standard rustakka-agent triplet:
+
+1. **Persona** (`Option<Persona>`) → system-prompt fragments.
+2. **IqLadder** → per-role model rung + carryings selection.
+3. **`AgentEnv`** → mock provider + deterministic fixtures under
+   `Test`.
+
+#### 5a.3.1 Minimum pattern set
+
+All patterns live in `rustakka-agent-prebuilt::patterns::*` behind
+the umbrella feature `patterns` and individual sub-features so small
+deployments pay only for what they import.
+
+| Pattern                    | Module / feature                 | Shape                                                                 | Notable channels / knobs                                        |
+|----------------------------|----------------------------------|-----------------------------------------------------------------------|-----------------------------------------------------------------|
+| **Plan-and-Execute**       | `plan_execute` / `plan-execute`  | `planner → executor[*] → replanner? → END`                            | `plan`, `plan.steps`, `plan.cursor`, `plan.revisions`           |
+| **Reflexion**              | `reflexion` / `reflexion`        | `act → evaluate → reflect → act`  (bounded by `max_reflections`)      | `reflexion.memory`, `reflexion.critique`, `reflexion.attempts`  |
+| **Evaluator–Optimizer**    | `evaluator_optimizer` / `eval-opt` | `generate → evaluate → (accept? | optimize → generate)`              | `eval.score`, `eval.threshold`, `eval.rubric`                   |
+| **Self-Consistency**       | `self_consistency` / `self-consistency` | `fan_out[N generators] → majority/scorer → aggregate`            | `sc.samples`, `sc.votes`, `sc.winner`                           |
+| **Tree-of-Thoughts / LATS**| `tot` / `tree-of-thought`        | `expand → evaluate → select → expand …` with bounded MCTS-style search| `tot.frontier`, `tot.scores`, `tot.budget`                      |
+| **Debate / Jury**          | `debate` / `debate`              | `proposer[*] → critic[*] → judge` (multi-round)                       | `debate.rounds`, `debate.arguments`, `debate.verdict`           |
+| **Router / Mixture-of-Experts** | `router` / `router`         | `classifier → {expert_1, …, expert_n}`                                | `router.intent`, `router.selected`, `router.confidence`         |
+| **RAG**                    | `rag` / `rag`                    | `retriever → (rerank?) → grounded_generator → cite_checker`           | `rag.query`, `rag.docs`, `rag.citations`                        |
+| **Corrective RAG (CRAG)**  | `crag` / `crag`                  | `rag → self_grade → (regen | web_search → rag)` loop                  | `crag.grade`, `crag.mode ∈ {correct, ambiguous, incorrect}`     |
+| **Adaptive RAG**           | `adaptive_rag` / `adaptive-rag`  | `router → {no_retrieve, single_retrieve, multi_hop_retrieve} → gen`   | `rag.strategy`                                                  |
+| **Self-RAG**               | `self_rag` / `self-rag`          | `generate(with reflection tokens) → verify → regenerate?`             | `self_rag.reflect_tokens`, `self_rag.support`                   |
+| **Human-in-the-Loop Gate** | `hitl_gate` / `hitl`             | `propose → interrupt(await_human) → resume`                           | `hitl.awaiting`, `hitl.decision`, `hitl.payload`                |
+| **Memory-Augmented Agent** | `memory_agent` / `memory`        | ReAct with a **long-term-memory** subgraph (read/write/update/forget) | `memory.scope ∈ {session, user, world}`, `memory.store`         |
+| **Toolformer / Codex loop**| `codex_loop` / `codex-loop`      | `plan → code → run → observe → repair` (bounded)                      | `codex.diff`, `codex.test_log`, `codex.attempts`                |
+| **Guardrails / Policy**    | `guardrails` / `guardrails`      | `pre_check → agent → post_check` with refusal routes                  | `guard.preflight`, `guard.postflight`, `guard.refusal_reason`   |
+
+#### 5a.3.2 Common `Pattern` trait
+
+Each factory also exposes a typed builder so patterns can be nested:
+
+```rust
+pub trait Pattern {
+    /// Crate-stable name, e.g. "plan_execute".
+    fn name(&self) -> &'static str;
+
+    /// Channels this pattern writes/reads. Used for state merging
+    /// when composed as a subgraph.
+    fn channels(&self) -> &[ChannelSpec];
+
+    /// Produce a `NodeKind` that invokes this pattern as a subgraph.
+    fn as_node(self: Arc<Self>) -> NodeKind;
+
+    /// Build a standalone compiled graph.
+    fn compile(self: Arc<Self>) -> GraphResult<CompiledStateGraph>;
+}
+```
+
+Concrete examples of composition:
+
+```rust,ignore
+// "Deep persona" = plan-execute on the outside, reflexion inside
+// every executor step, RAG inside every tool call.
+let rag       = rag::Builder::new(retriever).compile_pattern()?;
+let reflexion = reflexion::Builder::new()
+    .max_reflections(3)
+    .inner(executor_fn_backed_by(rag.clone()))
+    .compile_pattern()?;
+let app = plan_execute::Builder::new()
+    .planner(planner_node(&ladder, IqTier::Strategist))
+    .executor(reflexion.clone().as_node())
+    .replanner(true)
+    .persona(Some(persona))
+    .ladder(ladder)
+    .compile()
+    .await?;
+```
+
+#### 5a.3.3 Persona + ladder integration
+
+Every pattern factory accepts `Option<Persona>` and `IqLadder` and
+applies them uniformly:
+
+- Role → tier mapping is **pattern-specific**: a planner node runs
+  at `Strategist`, an evaluator at `Analyst`, a majority aggregator
+  at `Reflex`, etc. These mappings are overridable via a
+  `RoleTierMap` passed in the builder.
+- Persona `to_system_prompt()` is split by **role**
+  (`persona.role_fragment("planner")`, `…("critic")`, …) so that a
+  single persona can modulate every node in the pattern
+  consistently.
+- EQ `reflection_cadence` silently upgrades ReAct-style patterns to
+  their reflexion variants when set to `AfterEachTurn`.
+
+#### 5a.3.4 State & namespacing rules
+
+- All pattern-written channels live under a **namespace** matching
+  the pattern name: `plan.*`, `reflexion.*`, `rag.*`, … so that
+  composing patterns never collides on channel keys.
+- Every pattern defines stable constants
+  (`pub mod channels { pub const … }`) so downstream checkpoint
+  inspectors, visualizations, and tests can rely on them.
+- Interrupt-capable patterns (Plan-Execute's replanner, HITL gate,
+  Reflexion's reflection, Debate's judge) **must** use the upstream
+  `interrupt_before` / `interrupt_after` mechanism — they do not
+  implement their own pause primitive.
+
+#### 5a.3.5 Tests & fixtures
+
+- A shared `tests/patterns_fixtures/` directory holds deterministic
+  scripted `MockChatModel` transcripts. Each pattern has:
+  - a **happy-path** test (expected trajectory),
+  - a **bound-exhaustion** test (max reflections / samples / rounds
+    reached → graceful finalization),
+  - a **composition** test nesting the pattern inside at least one
+    other pattern.
+- Snapshot tests (`insta`) lock the final state payload so any
+  prompt- or topology-change is an explicit, reviewable diff.
+
+#### 5a.3.6 Non-goals
+
+- No pattern bundles a real tool implementation; tools plug in via
+  `rustakka-langgraph-prebuilt::Tool`.
+- We do not ship a DSL for authoring new patterns. Authors write a
+  normal Rust module implementing `Pattern`. A macro
+  (`#[pattern(name = "…")]`) is listed as a Phase-9 follow-up.
+- Patterns are not a replacement for AI-Q or OMO — those are
+  opinionated, end-to-end agents. Patterns are *ingredients*.
+
 ---
 
 ## 6. Python façade
@@ -787,6 +936,27 @@ The plan is deliberately matched to the 0–9 cadence of
   hashline rejects stale edits.
 - `examples/rust_omo_harness` + `docs/omo-harness.md`.
 
+### Phase 5c — Common agentic patterns catalog
+- `rustakka-agent-prebuilt::patterns::*` behind an umbrella
+  `patterns` feature plus per-pattern sub-features.
+- Implement the minimum set:
+  `plan_execute`, `reflexion`, `evaluator_optimizer`,
+  `self_consistency`, `tot` (Tree-of-Thoughts / LATS), `debate`,
+  `router`, `rag`, `crag`, `adaptive_rag`, `self_rag`,
+  `hitl_gate`, `memory_agent`, `codex_loop`, `guardrails`.
+- Shared `Pattern` trait (`name`, `channels`, `as_node`, `compile`)
+  so patterns compose as subgraphs.
+- Stable channel namespaces per pattern (`plan.*`, `reflexion.*`,
+  `rag.*`, `crag.*`, `debate.*`, `hitl.*`, `memory.*`, …).
+- Role → tier mapping + `RoleTierMap` override so each internal
+  node picks the right ladder rung.
+- `EqProfile.reflection_cadence == AfterEachTurn` silently upgrades
+  ReAct-style patterns to their reflexion variants.
+- Tests per pattern: happy-path, bound-exhaustion, composition
+  (pattern nested inside another pattern).
+- `docs/patterns.md` + four examples (plan-execute, reflexion,
+  RAG suite, debate).
+
 ### Phase 6 — Umbrella crate + profiler
 - `rustakka-agent` facade re-exports with `persona`, `prebuilt`,
   `providers` feature flags.
@@ -800,11 +970,15 @@ The plan is deliberately matched to the 0–9 cadence of
 
 ### Phase 8 — Docs & examples
 - `examples/rust_persona_react`, `examples/rust_supervisor_team`,
-  `examples/rust_aiq_research`, `examples/rust_omo_harness`.
+  `examples/rust_aiq_research`, `examples/rust_omo_harness`,
+  `examples/rust_pattern_plan_execute`,
+  `examples/rust_pattern_reflexion`,
+  `examples/rust_pattern_rag_suite`,
+  `examples/rust_pattern_debate`.
 - `docs/persona-schema.md` (authoritative JSON schema for personas).
 - `docs/iq-ladders.md` (authoritative schema for ladders + carryings).
-- `docs/aiq-research.md` / `docs/omo-harness.md` — topology,
-  routing, middleware references.
+- `docs/aiq-research.md` / `docs/omo-harness.md` / `docs/patterns.md`
+  — topology, routing, middleware, composition references.
 - `docs/integration.md` (how to migrate existing
   `create_react_agent` callers).
 

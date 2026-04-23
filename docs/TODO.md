@@ -58,16 +58,57 @@ checkboxes as PRs land.
       - [ ] Integration tests: routing by category, boulder resume,
             stale-edit rejection
       - [ ] `examples/rust_omo_harness` + `docs/omo-harness.md`
+- [ ] **Phase 5c** — Common agentic patterns catalog
+      (`rustakka-agent-prebuilt::patterns::*`, umbrella feature
+      `patterns` + per-pattern sub-features):
+      - [ ] Shared `Pattern` trait (`name` / `channels` / `as_node`
+            / `compile`) for composition as subgraphs
+      - [ ] Role → tier mapping + `RoleTierMap` override
+      - [ ] `plan_execute` (planner → executor[*] → replanner?)
+      - [ ] `reflexion` (act → evaluate → reflect → act, bounded)
+      - [ ] `evaluator_optimizer` (generate → evaluate → accept or
+            optimize → generate)
+      - [ ] `self_consistency` (fan-out generators → majority /
+            scorer → aggregate)
+      - [ ] `tot` / LATS (expand → evaluate → select, bounded
+            MCTS-style search)
+      - [ ] `debate` (proposer[*] → critic[*] → judge,
+            multi-round)
+      - [ ] `router` / mixture-of-experts (classifier → experts)
+      - [ ] `rag` (retriever → rerank? → grounded generator →
+            cite checker)
+      - [ ] `crag` corrective RAG (rag → self-grade → regen or
+            web_search → rag)
+      - [ ] `adaptive_rag` (router → {no/ single/ multi-hop
+            retrieve} → gen)
+      - [ ] `self_rag` (reflection-token generation → verify →
+            regenerate?)
+      - [ ] `hitl_gate` (propose → interrupt → resume)
+      - [ ] `memory_agent` (long-term-memory subgraph with
+            session / user / world scopes)
+      - [ ] `codex_loop` (plan → code → run → observe → repair,
+            bounded)
+      - [ ] `guardrails` (pre_check → agent → post_check with
+            refusal routes)
+      - [ ] Per-pattern tests: happy path, bound exhaustion,
+            composition
+      - [ ] `docs/patterns.md` + four examples
+            (`rust_pattern_plan_execute`,
+            `rust_pattern_reflexion`, `rust_pattern_rag_suite`,
+            `rust_pattern_debate`)
 - [ ] **Phase 6** — Umbrella `rustakka-agent` crate (feature gates
-      including `aiq-research` and `omo-harness`) and
+      including `aiq-research`, `omo-harness`, `patterns`) and
       `rustakka-agent-profiler` scenarios
 - [ ] **Phase 7** — `pyagent` cdylib + `python/rustakka_agent`
       package + pytest parity suite
 - [ ] **Phase 8** — Examples (`rust_persona_react`,
       `rust_supervisor_team`, `rust_aiq_research`,
-      `rust_omo_harness`) + `docs/persona-schema.md` +
+      `rust_omo_harness`, `rust_pattern_plan_execute`,
+      `rust_pattern_reflexion`, `rust_pattern_rag_suite`,
+      `rust_pattern_debate`) + `docs/persona-schema.md` +
       `docs/iq-ladders.md` + `docs/aiq-research.md` +
-      `docs/omo-harness.md` + `docs/integration.md`
+      `docs/omo-harness.md` + `docs/patterns.md` +
+      `docs/integration.md`
 - [ ] **Phase 9** — Hardening: fuzzing loaders (persona + ladder),
       golden-file prompt tests, committed benchmarks, safety
       red-team suite
