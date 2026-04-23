@@ -1,0 +1,18 @@
+[package]
+name         = "rustakka-agent"
+version      = { workspace = true }
+edition      = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+rust-version = { workspace = true }
+description  = "Umbrella facade for the rustakka-agent crates."
+
+[features]
+default = ["persona"]
+persona = []
+
+[dependencies]
+rustakka-agent-traits  = { path = "../rustakka-agent-traits" }
+rustakka-agent-iq      = { path = "../rustakka-agent-iq" }
+rustakka-agent-eq      = { path = "../rustakka-agent-eq" }
+rustakka-agent-persona = { path = "../rustakka-agent-persona" }

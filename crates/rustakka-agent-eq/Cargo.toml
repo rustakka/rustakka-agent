@@ -1,0 +1,15 @@
+[package]
+name         = "rustakka-agent-eq"
+version      = { workspace = true }
+edition      = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+rust-version = { workspace = true }
+description  = "EQ profile (emotional characteristics) for rustakka-agent. STUB."
+
+[dependencies]
+serde = { workspace = true }
+rustakka-agent-traits = { path = "../rustakka-agent-traits" }
+
+[dev-dependencies]
+serde_json = { workspace = true }
