@@ -89,6 +89,7 @@ crates/
   rustakka-agent-eq/           # EQ profile: empathy, tone, mood, reflection
   rustakka-agent-persona/      # Persona struct + builder + (de)serialization
   rustakka-agent-prebuilt/     # Bridge into rustakka-langgraph prebuilts
+                               # + aiq_research graph
   rustakka-agent/              # Umbrella façade (feature-gated re-exports)
   rustakka-agent-profiler/     # Micro-bench: persona-compile / prompt-assembly
   py-bindings/pyagent/         # Optional PyO3 cdylib -> rustakka_agent._native
@@ -98,11 +99,13 @@ python/
 examples/
   rust_persona_react/          # ReAct agent with a persona
   rust_supervisor_team/        # Multi-persona supervisor team
+  rust_aiq_research/           # AI-Q-style deep-research graph
 docs/
   plan.md                      # (this file)
   TODO.md
   persona-schema.md
   iq-ladders.md                # YAML/TOML schema for IqLadder / carryings
+  aiq-research.md              # AI-Q graph topology, state, middleware
   integration.md
 ```
 
@@ -402,6 +405,144 @@ existing public APIs already exercised by upstream tests.
 
 ---
 
+## 5a. Prebuilt research graphs
+
+Beyond the minimal persona wrappers of § 5, `rustakka-agent-prebuilt`
+ships opinionated, end-to-end agent graphs that are ready to compile.
+They are expressed purely in terms of `rustakka-langgraph` primitives
+(`StateGraph`, `NodeKind`, `ChannelSpec`, tool-condition routers) so
+they benefit automatically from checkpointing, streaming, store
+injection, and visualization.
+
+### 5a.1 Deep research graph — AI-Q-style (`aiq_research`)
+
+Modeled after the
+[NVIDIA AI-Q Research Agent Blueprint](https://docs.nvidia.com/aiq-blueprint/2.0.0/architecture/overview.html)
+(overview, deep-researcher, shallow-researcher). Port the *shape*
+of the blueprint — orchestrator state machine, intent classifier,
+shallow/deep split, planner → researcher → critic loop, citation
+verification middleware — into native rustakka-langgraph, with all
+components swappable via personas and the IQ ladder.
+
+#### Topology
+
+```text
+                     ┌───────────────┐
+   user query ─────▶ │  clarifier    │◀── optional HITL approval
+                     └──────┬────────┘
+                            ▼
+                     ┌───────────────┐
+                     │ intent        │  (single-LLM classifier)
+                     │ classifier    │
+                     └───┬──────┬────┘
+                "shallow"│      │"deep"
+                         ▼      ▼
+      ┌──────────────────┐   ┌──────────────────────────────┐
+      │ shallow researcher│  │ deep researcher orchestrator │
+      │ (tight tool loop) │  │                              │
+      └────────┬─────────┘   │  ┌───────────┐               │
+               │             │  │  planner  │               │
+               │             │  └─────┬─────┘               │
+               │             │        ▼                     │
+               │             │  ┌───────────┐  fan-out      │
+               │             │  │researcher │──┬─▶ evidence │
+               │             │  └─────┬─────┘  ├─▶ comparator│
+               │             │        ▼        └─▶ critic   │
+               │             │  ┌───────────┐               │
+               │             │  │ synthesizer│              │
+               │             │  └─────┬─────┘               │
+               │             └────────┼──────────────────────┘
+               │                      ▼
+               └──────────▶ ┌────────────────────┐
+                             │ citation verifier /│
+                             │ report sanitizer   │ (middleware)
+                             └─────────┬──────────┘
+                                       ▼
+                                   final report
+```
+
+#### Crate + API
+
+- Lives in `rustakka-agent-prebuilt::aiq_research`.
+- Behind a Cargo feature `aiq-research` on the umbrella crate so
+  small deployments don't pay for it.
+
+```rust
+pub struct AiqResearchOptions {
+    pub persona: Option<Persona>,
+    pub ladder: IqLadder,                        // drives per-subagent models
+    pub allow_deep_path: bool,                   // false ⇒ always shallow
+    pub hitl_clarifier: bool,                    // enable human-in-the-loop
+    pub ensemble: Option<EnsembleConfig>,        // optional parallel runs
+    pub post_hoc_refiner: bool,                  // polish final report
+    pub citation_verifier: Arc<dyn CitationVerifier>,
+    pub tools: AiqToolkit,                       // search / retriever / code …
+}
+
+pub async fn create_aiq_research_agent(
+    opts: AiqResearchOptions,
+) -> GraphResult<CompiledStateGraph>;
+```
+
+#### Subagent / tier mapping
+
+The default IQ ladder assigns tiers per subagent; all assignments are
+overridable via `AiqResearchOptions`.
+
+| Subagent               | Default IQ tier | Default carryings                          |
+|------------------------|-----------------|--------------------------------------------|
+| `clarifier`            | `Operator`      | low temp, short max-tokens                 |
+| `intent_classifier`    | `Reflex`        | temp=0.0, max_tokens=32, cache=long        |
+| `shallow_researcher`   | `Analyst`       | tool-enabled tight ReAct loop              |
+| `planner`              | `Strategist`    | high max-tokens, reflection on             |
+| `researcher` (root)    | `Strategist`    | fan-out enabled                            |
+| `evidence_gatherer`    | `Analyst`       | retrieval tools only                       |
+| `comparator`           | `Analyst`       | compare/contrast prompt fragments          |
+| `critic`               | `Strategist`    | self-critique prompt fragments             |
+| `synthesizer`          | `Scholar`       | largest max-tokens, ensemble-aware         |
+| `post_hoc_refiner`     | `Strategist`    | style-normalizing prompt fragments         |
+
+#### State
+
+```rust
+/// Namespaced channels written into the graph state. Names are
+/// stable so downstream visualizations / checkpoint inspectors can
+/// rely on them.
+pub mod channels {
+    pub const MESSAGES: &str        = "messages";           // add_messages
+    pub const INTENT: &str          = "aiq.intent";         // "shallow"|"deep"
+    pub const PLAN: &str            = "aiq.plan";           // Value (JSON)
+    pub const EVIDENCE: &str        = "aiq.evidence";       // append list
+    pub const CRITIQUES: &str       = "aiq.critiques";      // append list
+    pub const CITATIONS: &str       = "aiq.citations";      // append list
+    pub const REPORT: &str          = "aiq.report";         // final string
+    pub const SANITIZATION_LOG: &str = "aiq.sanitization";  // append list
+}
+```
+
+`CitationVerifier` and `ReportSanitizer` are public traits with a
+default implementation (`DefaultCitationVerifier`) that performs HEAD
+requests (or, in `AgentEnv::Test`, uses a deterministic fixture).
+
+#### Streaming / checkpointing
+
+- Multi-mode streaming and `subgraphs=True` work out-of-the-box —
+  the graph is just another `CompiledStateGraph`.
+- A long-running deep-research run is expected to be paired with a
+  `PostgresSaver` + `Durability::Async` in production, and
+  `MemorySaver` in dev/test.
+
+#### Non-goals for the port
+
+- We do **not** replicate NVIDIA AI-Q's prompt text verbatim — only
+  the topology, state, and routing semantics. Prompt content is
+  persona-rendered.
+- We do **not** bundle NIM endpoints or vendor-specific tools; those
+  plug in via `rustakka-langgraph-providers` and the standard
+  `Tool` registration path.
+
+---
+
 ## 6. Python façade
 
 Mirrors the `rustakka-langgraph` approach:
@@ -491,6 +632,24 @@ The plan is deliberately matched to the 0–9 cadence of
 - `tools_condition` biasing from `IqProfile.tool_eagerness`.
 - End-to-end test: a "cautious" persona skips unsafe tools.
 
+### Phase 5a — AI-Q-style deep-research graph
+- `rustakka-agent-prebuilt::aiq_research` module (Cargo feature
+  `aiq-research`).
+- Clarifier (HITL) → intent classifier → shallow / deep split.
+- Deep path: planner → researcher (fan-out: evidence gatherer,
+  comparator, critic) → synthesizer → post-hoc refiner.
+- `CitationVerifier` + `ReportSanitizer` traits with default impls
+  and a deterministic fixture-backed impl for `AgentEnv::Test`.
+- Stable channel namespace (`aiq.intent`, `aiq.plan`, `aiq.evidence`,
+  `aiq.critiques`, `aiq.citations`, `aiq.report`,
+  `aiq.sanitization`).
+- Per-subagent default IQ-tier mapping; overridable via
+  `AiqResearchOptions`.
+- Integration tests with a mock provider: shallow path returns a
+  single turn; deep path runs ≥ 2 researcher fan-outs and produces
+  a sanitized report.
+- `examples/rust_aiq_research` + `docs/aiq-research.md`.
+
 ### Phase 6 — Umbrella crate + profiler
 - `rustakka-agent` facade re-exports with `persona`, `prebuilt`,
   `providers` feature flags.
@@ -503,9 +662,11 @@ The plan is deliberately matched to the 0–9 cadence of
 - `maturin develop` smoke test in CI.
 
 ### Phase 8 — Docs & examples
-- `examples/rust_persona_react` and
-  `examples/rust_supervisor_team`.
+- `examples/rust_persona_react`, `examples/rust_supervisor_team`,
+  `examples/rust_aiq_research`.
 - `docs/persona-schema.md` (authoritative JSON schema for personas).
+- `docs/iq-ladders.md` (authoritative schema for ladders + carryings).
+- `docs/aiq-research.md` — topology, routing, middleware reference.
 - `docs/integration.md` (how to migrate existing
   `create_react_agent` callers).
 
