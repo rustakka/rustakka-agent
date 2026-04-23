@@ -5,11 +5,19 @@ edition      = { workspace = true }
 license      = { workspace = true }
 repository   = { workspace = true }
 rust-version = { workspace = true }
-description  = "IQ profile (cognitive characteristics) for rustakka-agent. STUB."
+description  = "IQ profile (cognitive characteristics) for rustakka-agent."
+
+[features]
+# Opt-in blanket impls against upstream `rustakka-langgraph-providers`
+# types. Off by default so `rustakka-agent-iq` stays a pure-data crate
+# usable in validators / CLI tools without pulling in async + network
+# transitive deps.
+default  = []
+langgraph = ["dep:rustakka-langgraph-providers"]
 
 [dependencies]
-serde = { workspace = true }
-rustakka-agent-traits = { path = "../rustakka-agent-traits" }
-
-[dev-dependencies]
+serde      = { workspace = true }
 serde_json = { workspace = true }
+thiserror  = { workspace = true }
+rustakka-agent-traits = { path = "../rustakka-agent-traits" }
+rustakka-langgraph-providers = { workspace = true, optional = true }

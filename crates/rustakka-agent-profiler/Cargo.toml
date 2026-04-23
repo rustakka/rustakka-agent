@@ -1,0 +1,22 @@
+[package]
+name         = "rustakka-agent-profiler"
+version      = { workspace = true }
+edition      = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+rust-version = { workspace = true }
+description  = "Micro-benchmarks and profiling scenarios for rustakka-agent (persona compile, prompt render, react turn)."
+
+[dependencies]
+serde_json = { workspace = true }
+tokio      = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
+rustakka-agent-traits  = { path = "../rustakka-agent-traits" }
+rustakka-agent-iq      = { path = "../rustakka-agent-iq" }
+rustakka-agent-eq      = { path = "../rustakka-agent-eq" }
+rustakka-agent-persona = { path = "../rustakka-agent-persona" }
+rustakka-agent-prebuilt = { path = "../rustakka-agent-prebuilt" }
+rustakka-langgraph-providers = { workspace = true }
+
+[[bin]]
+name = "profiler"
+path = "src/main.rs"

@@ -1,0 +1,73 @@
+[package]
+name         = "rustakka-agent-prebuilt"
+version      = { workspace = true }
+edition      = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+rust-version = { workspace = true }
+description  = "Persona-aware adapters and prebuilt agent graphs (ReAct, supervisor, swarm, AI-Q, OMO, pattern catalog)."
+
+[features]
+default = [
+    "aiq-research",
+    "omo-harness",
+    "patterns",
+]
+
+aiq-research = []
+omo-harness  = []
+
+# Umbrella for the pattern catalog; individual sub-features toggle
+# subsets so very small deployments can opt in piece-by-piece.
+patterns = [
+    "plan-execute",
+    "reflexion",
+    "eval-opt",
+    "self-consistency",
+    "tree-of-thought",
+    "debate",
+    "router",
+    "rag",
+    "crag",
+    "adaptive-rag",
+    "self-rag",
+    "hitl",
+    "memory",
+    "codex-loop",
+    "guardrails",
+]
+
+plan-execute      = []
+reflexion         = []
+eval-opt          = []
+self-consistency  = []
+tree-of-thought   = []
+debate            = []
+router            = []
+rag               = []
+crag              = []
+adaptive-rag      = []
+self-rag          = []
+hitl              = []
+memory            = []
+codex-loop        = []
+guardrails        = []
+
+[dependencies]
+serde        = { workspace = true }
+serde_json   = { workspace = true }
+thiserror    = { workspace = true }
+async-trait  = { workspace = true }
+tokio        = { workspace = true }
+futures      = { workspace = true }
+rustakka-agent-traits  = { path = "../rustakka-agent-traits" }
+rustakka-agent-iq      = { path = "../rustakka-agent-iq", features = ["langgraph"] }
+rustakka-agent-eq      = { path = "../rustakka-agent-eq" }
+rustakka-agent-persona = { path = "../rustakka-agent-persona" }
+
+# Real upstream — this crate is now an additive layer *on top of*
+# rustakka-langgraph, not a parallel re-implementation.
+rustakka-langgraph-core      = { workspace = true }
+rustakka-langgraph-providers = { workspace = true }
+rustakka-langgraph-prebuilt  = { workspace = true }
+rustakka-langgraph-store     = { workspace = true }

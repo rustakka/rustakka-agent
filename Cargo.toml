@@ -5,6 +5,8 @@ members = [
     "crates/rustakka-agent-iq",
     "crates/rustakka-agent-eq",
     "crates/rustakka-agent-persona",
+    "crates/rustakka-agent-prebuilt",
+    "crates/rustakka-agent-profiler",
     "crates/rustakka-agent",
 ]
 
@@ -19,3 +21,26 @@ rust-version  = "1.76"
 serde        = { version = "1", features = ["derive"] }
 serde_json   = "1"
 thiserror    = "1"
+async-trait  = "0.1"
+tokio        = { version = "1", features = ["macros", "rt", "rt-multi-thread", "sync"] }
+futures      = "0.3"
+
+# Upstream rustakka-langgraph — path deps against a local sibling checkout
+# at ../rustakka-langgraph. Swap for crates.io / git deps at release time.
+rustakka-langgraph-core      = { path = "../rustakka-langgraph/crates/rustakka-langgraph-core" }
+rustakka-langgraph-providers = { path = "../rustakka-langgraph/crates/rustakka-langgraph-providers", default-features = false, features = ["mock"] }
+rustakka-langgraph-prebuilt  = { path = "../rustakka-langgraph/crates/rustakka-langgraph-prebuilt" }
+rustakka-langgraph-store     = { path = "../rustakka-langgraph/crates/rustakka-langgraph-store" }
+
+# Mirror the upstream workspace's [patch] section so the local
+# sibling checkout of `rustakka` (the actor runtime that
+# rustakka-langgraph depends on) is used instead of the pinned
+# git revision. Without this, `rustakka-langgraph-core` builds
+# against an old `rustakka-streams` that lacks newer APIs
+# (`Source::from_receiver`, `KillSwitch`, …).
+[patch."https://github.com/cognect/rustakka"]
+rustakka             = { path = "../rustakka/crates/rustakka" }
+rustakka-core        = { path = "../rustakka/crates/rustakka-core" }
+rustakka-config      = { path = "../rustakka/crates/rustakka-config" }
+rustakka-persistence = { path = "../rustakka/crates/rustakka-persistence" }
+rustakka-streams     = { path = "../rustakka/crates/rustakka-streams" }

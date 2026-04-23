@@ -8,11 +8,21 @@ rust-version = { workspace = true }
 description  = "Umbrella facade for the rustakka-agent crates."
 
 [features]
-default = ["persona"]
-persona = []
+default = ["persona", "prebuilt", "patterns", "aiq-research", "omo-harness"]
+
+persona  = []
+prebuilt = ["dep:rustakka-agent-prebuilt", "dep:rustakka-langgraph-providers"]
+patterns = ["prebuilt", "rustakka-agent-prebuilt/patterns"]
+aiq-research = ["prebuilt", "rustakka-agent-prebuilt/aiq-research"]
+omo-harness  = ["prebuilt", "rustakka-agent-prebuilt/omo-harness"]
 
 [dependencies]
-rustakka-agent-traits  = { path = "../rustakka-agent-traits" }
-rustakka-agent-iq      = { path = "../rustakka-agent-iq" }
-rustakka-agent-eq      = { path = "../rustakka-agent-eq" }
-rustakka-agent-persona = { path = "../rustakka-agent-persona" }
+rustakka-agent-traits   = { path = "../rustakka-agent-traits" }
+rustakka-agent-iq       = { path = "../rustakka-agent-iq" }
+rustakka-agent-eq       = { path = "../rustakka-agent-eq" }
+rustakka-agent-persona  = { path = "../rustakka-agent-persona" }
+rustakka-agent-prebuilt = { path = "../rustakka-agent-prebuilt", optional = true }
+rustakka-langgraph-providers = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }

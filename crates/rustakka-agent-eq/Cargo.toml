@@ -5,11 +5,9 @@ edition      = { workspace = true }
 license      = { workspace = true }
 repository   = { workspace = true }
 rust-version = { workspace = true }
-description  = "EQ profile (emotional characteristics) for rustakka-agent. STUB."
+description  = "EQ profile (emotional characteristics) for rustakka-agent."
 
 [dependencies]
-serde = { workspace = true }
-rustakka-agent-traits = { path = "../rustakka-agent-traits" }
-
-[dev-dependencies]
+serde      = { workspace = true }
 serde_json = { workspace = true }
+rustakka-agent-traits = { path = "../rustakka-agent-traits" }

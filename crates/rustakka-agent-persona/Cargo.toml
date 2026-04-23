@@ -5,11 +5,19 @@ edition      = { workspace = true }
 license      = { workspace = true }
 repository   = { workspace = true }
 rust-version = { workspace = true }
-description  = "Persona aggregate (IQ + EQ + non-physical identity) for rustakka-agent. STUB."
+description  = "Persona aggregate (IQ + EQ + non-physical identity) for rustakka-agent."
+
+[features]
+default = ["yaml", "toml"]
+yaml    = ["dep:serde_yaml"]
+toml    = ["dep:toml"]
 
 [dependencies]
-serde      = { workspace = true }
-serde_json = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+thiserror   = { workspace = true }
+serde_yaml  = { version = "0.9", optional = true }
+toml        = { version = "0.8", optional = true }
 rustakka-agent-traits = { path = "../rustakka-agent-traits" }
 rustakka-agent-iq     = { path = "../rustakka-agent-iq" }
 rustakka-agent-eq     = { path = "../rustakka-agent-eq" }
